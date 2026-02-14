@@ -6,6 +6,9 @@
  * 3. プッシュメッセージ送信関数の追加
  */
 
+/**
+ * LINE Webhookからのリクエストを処理するエントリポイント
+ */
 function doPost(e) {
   try {
     const contents = JSON.parse(e.postData.contents);
@@ -13,18 +16,20 @@ function doPost(e) {
     
     for (const event of events) {
       const userId = event.source.userId;
-      // ログ：受信イベントの記録
       console.log(`[Webhook] Event: ${event.type}, User: ${userId}`);
 
+      // テキストメッセージイベントのみを処理対象とする
       if (event.type === 'message' && event.message.type === 'text') {
         const userText = event.message.text.trim();
         const currentSession = getUserStatus(userId);
 
+        // キーワードに応じた処理分岐
         if (userText.toUpperCase() === '練習開始RENSHU') {
           handleStartEvent(event);
         } else if (userText.toUpperCase() === '振り返り開始FURIKAERI') {
           handleReviewStartEvent(event, currentSession);
         } else if (currentSession) {
+          // 進行中のセッションがある場合は、メッセージ内容に応じた更新処理を行う
           handleNaiguruMessage(event, currentSession, userText);
         }
       }
@@ -35,7 +40,7 @@ function doPost(e) {
 }
 
 /**
- * 練習開始処理
+ * 練習開始処理：新規セッションの作成と二重開始の防止
  */
 function handleStartEvent(event) {
   const userId = event.source.userId;
@@ -45,6 +50,7 @@ function handleStartEvent(event) {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
+  // 既に進行中（OPEN, ACTIVE, REVIEW_READY）のセッションがないか確認
   for (let i = data.length - 1; i >= 1; i--) {
     const status = data[i][COL.STATUS];
     if (data[i][COL.USER_ID] === userId && 
@@ -54,13 +60,14 @@ function handleStartEvent(event) {
     }
   }
 
+  // 新規セッション情報の作成
   const sessionId = userId + "_" + new Date().getTime();
   const rowSize = Object.keys(COL).length;
   const newRow = new Array(rowSize).fill("");
   
   newRow[COL.SESSION_ID] = sessionId;
   newRow[COL.TIMESTAMP_START] = new Date();
-  newRow[COL.LOGICAL_DATE] = logicalDate;
+  newRow[COL.LOGICAL_DATE] = logicalDate; // 30時基準の日付
   newRow[COL.USER_ID] = userId;
   newRow[COL.STATUS] = "OPEN";
   newRow[COL.REMIND_COUNT] = 0;
@@ -68,6 +75,7 @@ function handleStartEvent(event) {
   sheet.appendRow(newRow);
   console.log(`[Start] Created session: ${sessionId} at Row: ${sheet.getLastRow()}`);
 
+  // 前回の振り返り内容を添えてリプライ
   const pastEval = getPastEvaluation(userId);
   const welcomeMsg = `練習を開始しました！\n前回の振り返りの内容です\n\n${pastEval}\n\n今日の目標を入力してください。`;
   
@@ -75,13 +83,15 @@ function handleStartEvent(event) {
 }
 
 /**
- * 過去の振り返り取得 (AI要約優先)
+ * 過去の振り返り内容を取得する
+ * 直近の完了済みセッション(CLOSED)からAI要約を優先して取得し、なければ固定メッセージを返す
  */
 function getPastEvaluation(userId) {
   console.log(`[PastEval] Getting past evaluation for User: ${userId}`);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
+  // ログを末尾から検索して直近のCLOSEDセッションを探す
   for (let i = data.length - 1; i >= 1; i--) {
     if (data[i][COL.USER_ID] === userId && data[i][COL.STATUS] === 'CLOSED') {
       const AI_ANALYZE_EVALUATION = data[i][COL.AI_ANALYZE_EVALUATION];
@@ -89,6 +99,7 @@ function getPastEvaluation(userId) {
         console.log(`[PastEval] AI Summary found for User: ${userId}`);
         return AI_ANALYZE_EVALUATION;
       } else {
+        // AI要約がまだ生成されていない場合のフォールバック
         console.log(`[PastEval] AI Summary NOT found, using default for User: ${userId}`);
         return "前回はナイス練習でした！今日も目標を持って頑張りましょう。";
       }
@@ -98,7 +109,7 @@ function getPastEvaluation(userId) {
 }
 
 /**
- * メッセージ受信による状態遷移
+ * 進行中のセッション状態に応じたメッセージ処理
  */
 function handleNaiguruMessage(event, session, userText) {
   console.log(`[Message] Handling message from User: ${session.userId || event.source.userId}, Status: ${session.status}`);
@@ -106,10 +117,11 @@ function handleNaiguruMessage(event, session, userText) {
   const rowIndex = session.rowIndex;
 
   if (session.status === 'OPEN') {
+    // 目標設定フェーズ：入力されたテキストを目標(THEME)として保存し、ステータスをACTIVEへ
     sheet.getRange(rowIndex, COL.THEME + 1).setValue(userText);
     sheet.getRange(rowIndex, COL.STATUS + 1).setValue('ACTIVE');
     
-    // リマインド予定：3時間後
+    // 初回リマインドを3時間後に設定
     const nextRemind = new Date(new Date().getTime() + 3 * 60 * 60 * 1000);
     sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(nextRemind);
     
@@ -117,14 +129,16 @@ function handleNaiguruMessage(event, session, userText) {
     replyLineMessage(event.replyToken, `目標「${userText}」を受け付けました。\n練習が終わったら「振り返り開始FURIKAERI」と送ってください。`);
 
   } else if (session.status === 'REVIEW_READY') {
+    // 振り返り入力フェーズ：内容を保存してセッションを終了(CLOSED)
     sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
     sheet.getRange(rowIndex, COL.STATUS + 1).setValue('CLOSED');
     sheet.getRange(rowIndex, COL.TIMESTAMP_END + 1).setValue(new Date());
-    sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(""); 
+    sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(""); // リマインド停止
 
     console.log(`[Message] Review completed for Row: ${rowIndex}. Status -> CLOSED`);
-    console.log(`[Trigger] Scheduling AI analysis: summarizeDartsPracticeSession for Row: ${rowIndex}...`);
     
+    // 1分後にAI解析（要約生成）を実行するトリガーを予約
+    console.log(`[Trigger] Scheduling AI analysis: summarizeDartsPracticeSession for Row: ${rowIndex}...`);
     ScriptApp.newTrigger('summarizeDartsPracticeSession')
       .timeBased()
       .after(60 * 1000)
@@ -135,8 +149,8 @@ function handleNaiguruMessage(event, session, userText) {
 }
 
 /**
- * リマインド・自動終了バッチ
- * ※ 1時間おき等の時間主導型トリガーで実行
+ * リマインド送信および長時間放置セッションの自動終了
+ * 1時間おき等の時間主導型トリガーで実行されることを想定
  */
 function checkAndSendReminders() {
   const logPrefix = "[RemindBatch]";
@@ -152,9 +166,10 @@ function checkAndSendReminders() {
     const remindCount = parseInt(data[i][COL.REMIND_COUNT] || 0);
     const rowIndex = i + 1;
 
+    // リマインド対象：進行中かつ次回リマインド時刻を過ぎているもの
     if ((status === 'ACTIVE' || status === 'REVIEW_READY') && nextRemindAt && new Date(nextRemindAt) <= now) {
       if (remindCount < 4) {
-        // リマインド送信
+        // リマインド送信：最大4回まで3時間おきに送信
         pushLineMessage(userId, "練習の調子はいかがですか？🎯\n終わったら「振り返り開始」から記録を付けましょう！");
         console.log(`${logPrefix} Sent reminder to User: ${userId} (Count: ${remindCount + 1})`);
         
@@ -163,7 +178,7 @@ function checkAndSendReminders() {
         sheet.getRange(rowIndex, COL.REMIND_COUNT + 1).setValue(remindCount + 1);
         sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(nextTime);
       } else {
-        // 自動終了
+        // 自動終了：リマインド上限に達した場合は、セッションを期限切れとして終了
         pushLineMessage(userId, "長時間反応がなかったため、セッションを自動終了しました。お疲れ様でした。");
         console.log(`${logPrefix} Auto-closed session for User: ${userId} (Max reminders reached)`);
         
@@ -176,7 +191,7 @@ function checkAndSendReminders() {
 }
 
 /**
- * 振り返り開始イベント
+ * 「振り返り開始」キーワード受信時の処理
  */
 function handleReviewStartEvent(event, session) {
   console.log(`[ReviewStart] Handling review start for User: ${event.source.userId}`);
@@ -185,6 +200,7 @@ function handleReviewStartEvent(event, session) {
     return;
   }
   
+  // ステータスを振り返り待ち(REVIEW_READY)に変更し、ユーザーにメッセージを促す
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   sheet.getRange(session.rowIndex, COL.STATUS + 1).setValue('REVIEW_READY');
   
@@ -192,7 +208,7 @@ function handleReviewStartEvent(event, session) {
 }
 
 /**
- * ユーザーの現在の進行中セッションを取得
+ * ユーザーの現在の進行中セッション（OPEN, ACTIVE, REVIEW_READY）を検索して取得
  */
 function getUserStatus(userId) {
   console.log(`[Status] Checking status for User: ${userId}`);
@@ -209,17 +225,17 @@ function getUserStatus(userId) {
 }
 
 /**
- * 30時基準の日付
+ * 30時基準の日付文字列を取得する（早朝の練習を前日分として扱うため）
  */
 function getLogicalDate(date) {
   console.log(`[Date] Calculating logical date for: ${date}`);
   const d = new Date(date.getTime());
-  d.setHours(d.getHours() - 6);
+  d.setHours(d.getHours() - 6); // 6時間戻す
   return Utilities.formatDate(d, "JST", "yyyy-MM-dd");
 }
 
 /**
- * LINE応答
+ * 指定された replyToken を使用して LINE に返信する
  */
 function replyLineMessage(replyToken, text) {
   console.log(`[Reply] Sending reply: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
