@@ -1,3 +1,9 @@
 Naiguru_Insight.code-workspace
 Naiguru_Insights.code-workspace
 Documents/
+
+# clasp
+.clasp.json
+.clasprc.json
+node_modules/
+package-lock.json
