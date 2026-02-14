@@ -131,10 +131,13 @@ function handleNaiguruMessage(event, session, userText) {
   } else if (session.status === 'REVIEW_READY') {
     // 振り返り内容の保存
     sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
+    SpreadsheetApp.flush(); // 即座に反映
     console.log(`[Message] Review note saved for Row: ${rowIndex}.`);
 
     // 数値入力が必要な項目があるかチェック
-    const rowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+    // 確実に全ての列を取得するため getLastColumn を使用、または定義済みの最大列数を指定
+    const lastCol = sheet.getLastColumn();
+    const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     const nextItem = getNextNumericItem(rowValues);
 
     if (nextItem) {
@@ -149,13 +152,15 @@ function handleNaiguruMessage(event, session, userText) {
 
   } else if (session.status === 'CLOSED') {
     // CLOSED状態だが、数値項目が未入力の場合は入力を受け付ける
-    const rowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+    const lastCol = sheet.getLastColumn();
+    const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     const nextItem = getNextNumericItem(rowValues);
 
     if (nextItem) {
       // 数値またはスキップの処理
       if (userText === SKIP_KEYWORD) {
-        // スキップ：何もしない（空欄のまま）
+        // スキップ：ハイフンを書き込んで「入力済み」扱いにする（空文字判定を避けるため）
+        sheet.getRange(rowIndex, nextItem.col + 1).setValue("-");
         console.log(`[Message] Skipped input for ${nextItem.label}`);
       } else {
         const num = Number(userText);
@@ -167,9 +172,11 @@ function handleNaiguruMessage(event, session, userText) {
           return;
         }
       }
+      
+      SpreadsheetApp.flush(); // 即座に反映
 
       // 次の項目をチェック
-      const updatedRowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+      const updatedRowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
       const followingItem = getNextNumericItem(updatedRowValues);
 
       if (followingItem) {
