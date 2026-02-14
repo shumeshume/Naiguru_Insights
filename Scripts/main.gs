@@ -1,5 +1,5 @@
 /**
- * main.gs - Naiguru Insights (v1.6.0)
+ * main.gs - Naiguru Insights (v1.6.1)
  * * 変更点:
  * 1. v1.4a からリマインド機能 (checkAndSendReminders) を復元し、COL定数に対応
  * 2. ロギング機能の追加
@@ -10,7 +10,12 @@
  * LINE Webhookからのリクエストを処理するエントリポイント
  */
 function doPost(e) {
+  // 短い間隔でのメッセージ受信による競合を防ぐためのロックを取得
+  const lock = LockService.getUserLock();
   try {
+    // 最大10秒間待機
+    lock.waitLock(10000);
+
     const contents = JSON.parse(e.postData.contents);
     const events = contents.events;
     
@@ -36,6 +41,9 @@ function doPost(e) {
     }
   } catch (e) {
     console.error(`[Critical Error] ${e.toString()}`);
+  } finally {
+    // 処理が完了したらロックを解放
+    lock.releaseLock();
   }
 }
 
