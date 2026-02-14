@@ -1,5 +1,5 @@
 /**
- * main.gs - Naiguru Insights (v1.5.2)
+ * main.gs - Naiguru Insights (v1.6.0)
  * * 変更点:
  * 1. v1.4a からリマインド機能 (checkAndSendReminders) を復元し、COL定数に対応
  * 2. ロギング機能の追加
