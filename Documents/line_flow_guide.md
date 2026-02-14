@@ -13,7 +13,7 @@ graph TD
     B --> C[練習中]
     C --> D[振り返り開始FURIKAERI]
     D --> E[振り返り文を送信]
-    E --> F[数値入力ループ]
+    E -- status: DATA_INPUT --> F[数値入力ループ]
     F --> G[全ての項目完了]
     G --> H[AI解析予約・終了]
 ```

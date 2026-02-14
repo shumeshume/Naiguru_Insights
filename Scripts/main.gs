@@ -131,27 +131,25 @@ function handleNaiguruMessage(event, session, userText) {
   } else if (session.status === 'REVIEW_READY') {
     // 振り返り内容の保存
     sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
+    // ステータスを DATA_INPUT に変更して、次からの入力が振り返り列を上書きしないようにする
+    sheet.getRange(rowIndex, COL.STATUS + 1).setValue('DATA_INPUT');
     SpreadsheetApp.flush(); // 即座に反映
-    console.log(`[Message] Review note saved for Row: ${rowIndex}.`);
+    console.log(`[Message] Review note saved and Status -> DATA_INPUT for Row: ${rowIndex}.`);
 
     // 数値入力が必要な項目があるかチェック
-    // 確実に全ての列を取得するため getLastColumn を使用、または定義済みの最大列数を指定
     const lastCol = sheet.getLastColumn();
     const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     const nextItem = getNextNumericItem(rowValues);
 
     if (nextItem) {
-      // 数値入力フェーズへ（ステータスはREVIEW_READYのままでも、CLOSEDにしても、数値項目が空であることで判定可能）
-      // ここでは、数値入力が終わるまで CLOSED にしない運用とする
       const msg = `振り返りを記録しました。\n次に数値を入力してください。\n\n${nextItem.label}を入力してください。\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`;
       replyLineMessage(event.replyToken, msg);
     } else {
-      // 数値項目がない（または既に埋まっている）場合は終了
       finalizeSession(sheet, rowIndex, event.replyToken);
     }
 
-  } else if (session.status === 'CLOSED') {
-    // CLOSED状態だが、数値項目が未入力の場合は入力を受け付ける
+  } else if (session.status === 'DATA_INPUT') {
+    // 数値入力フェーズ
     const lastCol = sheet.getLastColumn();
     const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
     const nextItem = getNextNumericItem(rowValues);
@@ -159,7 +157,6 @@ function handleNaiguruMessage(event, session, userText) {
     if (nextItem) {
       // 数値またはスキップの処理
       if (userText === SKIP_KEYWORD) {
-        // スキップ：ハイフンを書き込んで「入力済み」扱いにする（空文字判定を避けるため）
         sheet.getRange(rowIndex, nextItem.col + 1).setValue("-");
         console.log(`[Message] Skipped input for ${nextItem.label}`);
       } else {
@@ -281,7 +278,7 @@ function handleReviewStartEvent(event, session) {
 }
 
 /**
- * ユーザーの現在の進行中セッション（OPEN, ACTIVE, REVIEW_READY, および数値入力待ちのCLOSED）を検索して取得
+ * ユーザーの現在の進行中セッション（OPEN, ACTIVE, REVIEW_READY, DATA_INPUT）を検索して取得
  */
 function getUserStatus(userId) {
   console.log(`[Status] Checking status for User: ${userId}`);
@@ -291,18 +288,9 @@ function getUserStatus(userId) {
     const status = data[i][COL.STATUS];
     const userMatches = data[i][COL.USER_ID] === userId;
     
-    // 通常の進行中ステータス
-    if (userMatches && (status === 'OPEN' || status === 'ACTIVE' || status === 'REVIEW_READY')) {
+    // 通常の進行中ステータス（数値入力待ちの DATA_INPUT を含む）
+    if (userMatches && (status === 'OPEN' || status === 'ACTIVE' || status === 'REVIEW_READY' || status === 'DATA_INPUT')) {
       return { rowIndex: i + 1, status: status };
-    }
-    
-    // CLOSEDだが数値入力が完了していない場合（直近のセッションのみ）
-    if (userMatches && status === 'CLOSED') {
-      const nextItem = getNextNumericItem(data[i]);
-      if (nextItem) {
-        return { rowIndex: i + 1, status: 'CLOSED' };
-      }
-      // CLOSEDで数値も埋まっていれば、それは完了済みセッションなので次（過去）へ
     }
   }
   return null;
