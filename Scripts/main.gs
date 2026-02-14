@@ -129,23 +129,89 @@ function handleNaiguruMessage(event, session, userText) {
     replyLineMessage(event.replyToken, `目標「${userText}」を受け付けました。\n練習が終わったら「振り返り開始FURIKAERI」と送ってください。`);
 
   } else if (session.status === 'REVIEW_READY') {
-    // 振り返り入力フェーズ：内容を保存してセッションを終了(CLOSED)
+    // 振り返り内容の保存
     sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
-    sheet.getRange(rowIndex, COL.STATUS + 1).setValue('CLOSED');
-    sheet.getRange(rowIndex, COL.TIMESTAMP_END + 1).setValue(new Date());
-    sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(""); // リマインド停止
+    console.log(`[Message] Review note saved for Row: ${rowIndex}.`);
 
-    console.log(`[Message] Review completed for Row: ${rowIndex}. Status -> CLOSED`);
-    
-    // 1分後にAI解析（要約生成）を実行するトリガーを予約
-    console.log(`[Trigger] Scheduling AI analysis: summarizeDartsPracticeSession for Row: ${rowIndex}...`);
-    ScriptApp.newTrigger('summarizeDartsPracticeSession')
-      .timeBased()
-      .after(60 * 1000)
-      .create();
+    // 数値入力が必要な項目があるかチェック
+    const rowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+    const nextItem = getNextNumericItem(rowValues);
 
-    replyLineMessage(event.replyToken, "練習お疲れ様でした！振り返りを記録しました。");
+    if (nextItem) {
+      // 数値入力フェーズへ（ステータスはREVIEW_READYのままでも、CLOSEDにしても、数値項目が空であることで判定可能）
+      // ここでは、数値入力が終わるまで CLOSED にしない運用とする
+      const msg = `振り返りを記録しました。\n次に数値を入力してください。\n\n${nextItem.label}を入力してください。\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`;
+      replyLineMessage(event.replyToken, msg);
+    } else {
+      // 数値項目がない（または既に埋まっている）場合は終了
+      finalizeSession(sheet, rowIndex, event.replyToken);
+    }
+
+  } else if (session.status === 'CLOSED') {
+    // CLOSED状態だが、数値項目が未入力の場合は入力を受け付ける
+    const rowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+    const nextItem = getNextNumericItem(rowValues);
+
+    if (nextItem) {
+      // 数値またはスキップの処理
+      if (userText === SKIP_KEYWORD) {
+        // スキップ：何もしない（空欄のまま）
+        console.log(`[Message] Skipped input for ${nextItem.label}`);
+      } else {
+        const num = Number(userText);
+        if (!isNaN(num) && userText !== "") {
+          sheet.getRange(rowIndex, nextItem.col + 1).setValue(num);
+          console.log(`[Message] Saved ${nextItem.label}: ${num}`);
+        } else {
+          replyLineMessage(event.replyToken, `数値を入力してください。スキップする場合は「${SKIP_KEYWORD}」を入力してください。`);
+          return;
+        }
+      }
+
+      // 次の項目をチェック
+      const updatedRowValues = sheet.getRange(rowIndex, 1, 1, sheet.getLastRow()).getValues()[0];
+      const followingItem = getNextNumericItem(updatedRowValues);
+
+      if (followingItem) {
+        replyLineMessage(event.replyToken, `${followingItem.label}を入力してください。\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`);
+      } else {
+        finalizeSession(sheet, rowIndex, event.replyToken);
+      }
+    }
   }
+}
+
+/**
+ * セッションを完了状態にし、AI解析を予約する
+ */
+function finalizeSession(sheet, rowIndex, replyToken) {
+  sheet.getRange(rowIndex, COL.STATUS + 1).setValue('CLOSED');
+  sheet.getRange(rowIndex, COL.TIMESTAMP_END + 1).setValue(new Date());
+  sheet.getRange(rowIndex, COL.NEXT_REMIND_AT + 1).setValue(""); // リマインド停止
+
+  console.log(`[Message] Session finalized for Row: ${rowIndex}. Status -> CLOSED`);
+  
+  // 1分後にAI解析（要約生成）を実行するトリガーを予約
+  console.log(`[Trigger] Scheduling AI analysis: summarizeDartsPracticeSession for Row: ${rowIndex}...`);
+  ScriptApp.newTrigger('summarizeDartsPracticeSession')
+    .timeBased()
+    .after(60 * 1000)
+    .create();
+
+  replyLineMessage(replyToken, "練習お疲れ様でした！全ての記録を完了しました。");
+}
+
+/**
+ * 次に入力すべき数値項目を特定する
+ */
+function getNextNumericItem(rowValues) {
+  for (const item of NUMERIC_COL_DEFINITIONS) {
+    const val = rowValues[item.col];
+    if (val === "" || val === null || val === undefined) {
+      return item;
+    }
+  }
+  return null;
 }
 
 /**
@@ -208,7 +274,7 @@ function handleReviewStartEvent(event, session) {
 }
 
 /**
- * ユーザーの現在の進行中セッション（OPEN, ACTIVE, REVIEW_READY）を検索して取得
+ * ユーザーの現在の進行中セッション（OPEN, ACTIVE, REVIEW_READY, および数値入力待ちのCLOSED）を検索して取得
  */
 function getUserStatus(userId) {
   console.log(`[Status] Checking status for User: ${userId}`);
@@ -216,9 +282,20 @@ function getUserStatus(userId) {
   const data = sheet.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
     const status = data[i][COL.STATUS];
-    if (data[i][COL.USER_ID] === userId && 
-       (status === 'OPEN' || status === 'ACTIVE' || status === 'REVIEW_READY')) {
+    const userMatches = data[i][COL.USER_ID] === userId;
+    
+    // 通常の進行中ステータス
+    if (userMatches && (status === 'OPEN' || status === 'ACTIVE' || status === 'REVIEW_READY')) {
       return { rowIndex: i + 1, status: status };
+    }
+    
+    // CLOSEDだが数値入力が完了していない場合（直近のセッションのみ）
+    if (userMatches && status === 'CLOSED') {
+      const nextItem = getNextNumericItem(data[i]);
+      if (nextItem) {
+        return { rowIndex: i + 1, status: 'CLOSED' };
+      }
+      // CLOSEDで数値も埋まっていれば、それは完了済みセッションなので次（過去）へ
     }
   }
   return null;

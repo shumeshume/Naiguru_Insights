@@ -24,6 +24,17 @@ const COL = {
   TIME_PLAYED_ON_DARTSLIVE: 14   // O列
 };
 
+// 数値入力項目の定義（順番、ラベル、列の対応）
+const NUMERIC_COL_DEFINITIONS = [
+  { label: 'BULL数', col: COL.BULL_COUNT },
+  { label: 'LowTon数', col: COL.LOWTON_COUNT },
+  { label: 'Range', col: COL.RANGE },
+  { label: 'DARTSLIVEプレイ時間', col: COL.TIME_PLAYED_ON_DARTSLIVE }
+];
+
+// 入力をスキップするためのマジックワード
+const SKIP_KEYWORD = '-';
+
 // スクリプトプロパティから取得する共通設定
 const PROPERTIES = PropertiesService.getScriptProperties();
 const SPREADSHEET_ID = PROPERTIES.getProperty('SPREADSHEET_ID');
