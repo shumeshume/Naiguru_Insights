@@ -39,6 +39,7 @@ function doPost(e) {
  */
 function handleStartEvent(event) {
   const userId = event.source.userId;
+  console.log(`[Start] Handling start event for User: ${userId}`);
   const logicalDate = getLogicalDate(new Date());
   
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
@@ -77,6 +78,7 @@ function handleStartEvent(event) {
  * 過去の振り返り取得 (AI要約優先)
  */
 function getPastEvaluation(userId) {
+  console.log(`[PastEval] Getting past evaluation for User: ${userId}`);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
@@ -99,6 +101,7 @@ function getPastEvaluation(userId) {
  * メッセージ受信による状態遷移
  */
 function handleNaiguruMessage(event, session, userText) {
+  console.log(`[Message] Handling message from User: ${session.userId || event.source.userId}, Status: ${session.status}`);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const rowIndex = session.rowIndex;
 
@@ -137,6 +140,7 @@ function handleNaiguruMessage(event, session, userText) {
  */
 function checkAndSendReminders() {
   const logPrefix = "[RemindBatch]";
+  console.log(`${logPrefix} Starting reminder batch process...`);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   const now = new Date();
@@ -175,6 +179,7 @@ function checkAndSendReminders() {
  * 振り返り開始イベント
  */
 function handleReviewStartEvent(event, session) {
+  console.log(`[ReviewStart] Handling review start for User: ${event.source.userId}`);
   if (!session || (session.status !== 'OPEN' && session.status !== 'ACTIVE')) {
     replyLineMessage(event.replyToken, "練習が開始されていないか、既に振り返り待ちです。");
     return;
@@ -190,6 +195,7 @@ function handleReviewStartEvent(event, session) {
  * ユーザーの現在の進行中セッションを取得
  */
 function getUserStatus(userId) {
+  console.log(`[Status] Checking status for User: ${userId}`);
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
@@ -206,6 +212,7 @@ function getUserStatus(userId) {
  * 30時基準の日付
  */
 function getLogicalDate(date) {
+  console.log(`[Date] Calculating logical date for: ${date}`);
   const d = new Date(date.getTime());
   d.setHours(d.getHours() - 6);
   return Utilities.formatDate(d, "JST", "yyyy-MM-dd");
@@ -215,6 +222,7 @@ function getLogicalDate(date) {
  * LINE応答
  */
 function replyLineMessage(replyToken, text) {
+  console.log(`[Reply] Sending reply: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
   const url = 'https://api.line.me/v2/bot/message/reply';
   UrlFetchApp.fetch(url, {
     'headers': {
@@ -233,6 +241,7 @@ function replyLineMessage(replyToken, text) {
  * LINEプッシュ通知
  */
 function pushLineMessage(userId, text) {
+  console.log(`[Push] Sending push message to ${userId}: ${text.substring(0, 50)}${text.length > 50 ? '...' : ''}`);
   const url = 'https://api.line.me/v2/bot/message/push';
   UrlFetchApp.fetch(url, {
     'headers': {
