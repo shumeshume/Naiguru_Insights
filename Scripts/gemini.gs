@@ -5,8 +5,8 @@
  */
 
 /**
- * 振り返り内容をAIで要約し、スプレッドシートに書き込むメイン関数
- * ※ トリガーから非同期で呼び出されます。
+ * 練習セッションの振り返りをAIで要約し、スプレッドシートに書き込む
+ * メッセージ受信後に時間主導型トリガーから非同期で呼び出される
  */
 function summarizeDartsPracticeSession() {
   const logPrefix = "[AI_Analysis]";
@@ -19,7 +19,8 @@ function summarizeDartsPracticeSession() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
-  // 1. 解析対象の特定（下から検索: StatusがCLOSED かつ AI要約が空の最新行）
+  // 1. 解析対象の特定：
+  // シートを末尾から検索し、ステータスが「CLOSED」かつ「AI要約がまだ書き込まれていない」最新の行を探す
   let targetRowIndex = -1;
   let theme = "";
   let evaluationNote = "";
@@ -38,6 +39,7 @@ function summarizeDartsPracticeSession() {
     }
   }
 
+  // 解析対象がない場合はトリガーを削除して終了
   if (targetRowIndex === -1) {
     console.log(`${logPrefix} 解析対象が見つかりませんでした。`);
     deleteTriggerByHandler_('summarizeDartsPracticeSession');
@@ -45,7 +47,8 @@ function summarizeDartsPracticeSession() {
   }
 
   try {
-    // 2. プロンプト構築
+    // 2. プロンプト構築：
+    // 入力データ（目標と振り返り）に基づき、LINEで読みやすい形式の要約を依頼
     const prompt = `
 あなたはダーツの練習ログを整理する専門のアシスタントです。
 提供される「目標（Theme）」と「振り返り（Evaluation_Note）」に基づき、以下の制約を厳守して要約を作成してください。
@@ -64,23 +67,24 @@ Theme: ${theme}
 Evaluation_Note: ${evaluationNote}
     `.trim();
 
-    // 3. Gemini API 実行
+    // 3. Gemini API 実行（外部通信）
     const summary = callGeminiCore_(prompt, sessionId);
 
-    // 4. 結果の書き込み
+    // 4. 解析結果の書き込み
     sheet.getRange(targetRowIndex, COL.AI_ANALYZE_EVALUATION + 1).setValue(summary);
     console.log(`${logPrefix} Success: Session ${sessionId}`);
 
   } catch (e) {
     console.error(`${logPrefix} Error: ${e.toString()}`);
   } finally {
-    // 5. 使用済みトリガーの掃除
+    // 5. 使用済みトリガーの掃除：多重実行を防ぐため、処理完了（または失敗）後に自分自身のトリガーを削除
     deleteTriggerByHandler_('summarizeDartsPracticeSession');
   }
 }
 
 /**
- * Gemini API 通信コア関数 (指数バックオフ対応)
+ * Gemini API と通信を行うコア関数
+ * 指数バックオフによるリトライ処理を行い、一時的な通信エラーに対処する
  */
 function callGeminiCore_(prompt, logId) {
   if (!GEMINI_API_KEY) throw new Error('GEMINI_API_KEY is not set.');
@@ -95,24 +99,28 @@ function callGeminiCore_(prompt, logId) {
   };
 
   let lastError;
+  // 最大5回リトライ
   for (let i = 0; i < 5; i++) {
     try {
       const response = UrlFetchApp.fetch(url, options);
       const resJson = JSON.parse(response.getContentText());
       if (response.getResponseCode() === 200) {
+        // 正常終了時は解析結果のテキストを返す
         return resJson.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
       }
       lastError = response.getContentText();
     } catch (e) {
       lastError = e.toString();
     }
-    if (i < 4) Utilities.sleep(Math.pow(2, i) * 1000); // 1, 2, 4, 8, 16s
+    // 失敗時は待機時間を増やして再試行（1, 2, 4, 8, 16秒）
+    if (i < 4) Utilities.sleep(Math.pow(2, i) * 1000);
   }
   throw new Error(`Gemini API Failed: ${lastError}`);
 }
 
 /**
- * 実行完了したトリガーの削除
+ * 指定した名前を持つプロジェクトトリガーをすべて削除する
+ * 不要な非同期処理の残存を防ぐためのユーティリティ
  */
 function deleteTriggerByHandler_(functionName) {
   const triggers = ScriptApp.getProjectTriggers();
