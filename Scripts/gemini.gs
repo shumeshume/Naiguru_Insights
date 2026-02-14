@@ -10,15 +10,13 @@
  */
 function summarizeDartsPracticeSession() {
   const logPrefix = "[AI_Analysis]";
-  console.log(`${logPrefix} Started.`);
-
-  let sheet;
-  try {
-    sheet = getLogsSheet();
-  } catch (e) {
-    console.error(`${logPrefix} ${e.message}`);
+  
+  if (!SPREADSHEET_ID) {
+    console.error(`${logPrefix} SPREADSHEET_ID が未設定です。`);
     return;
   }
+
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
   // 1. 解析対象の特定（下から検索: StatusがCLOSED かつ AI要約が空の最新行）

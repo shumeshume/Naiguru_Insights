@@ -8,19 +8,13 @@
 
 function doPost(e) {
   try {
-    const signature = e.parameter['x-line-signature'] || e.postData.contents.split('x-line-signature')[1]; // 通常はヘッダーから取得
-    if (!verifySignature(e.postData.contents, e.parameter['x-line-signature'])) {
-      console.warn('[Webhook] Invalid signature detected.');
-      return;
-    }
-
     const contents = JSON.parse(e.postData.contents);
     const events = contents.events;
     
     for (const event of events) {
       const userId = event.source.userId;
-      const eventType = event.type;
-      console.log(`[Webhook] Event: ${eventType}, User: ${userId}`);
+      // ログ：受信イベントの記録
+      console.log(`[Webhook] Event: ${event.type}, User: ${userId}`);
 
       if (event.type === 'message' && event.message.type === 'text') {
         const userText = event.message.text.trim();
@@ -83,7 +77,7 @@ function handleStartEvent(event) {
  * 過去の振り返り取得 (AI要約優先)
  */
 function getPastEvaluation(userId) {
-  const sheet = getLogsSheet();
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   
   for (let i = data.length - 1; i >= 1; i--) {
@@ -105,7 +99,7 @@ function getPastEvaluation(userId) {
  * メッセージ受信による状態遷移
  */
 function handleNaiguruMessage(event, session, userText) {
-  const sheet = getLogsSheet();
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const rowIndex = session.rowIndex;
 
   if (session.status === 'OPEN') {
@@ -143,7 +137,7 @@ function handleNaiguruMessage(event, session, userText) {
  */
 function checkAndSendReminders() {
   const logPrefix = "[RemindBatch]";
-  const sheet = getLogsSheet();
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   const now = new Date();
   
@@ -186,7 +180,7 @@ function handleReviewStartEvent(event, session) {
     return;
   }
   
-  const sheet = getLogsSheet();
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   sheet.getRange(session.rowIndex, COL.STATUS + 1).setValue('REVIEW_READY');
   
   replyLineMessage(event.replyToken, "練習お疲れ様でした！今日の振り返りを入力してください。");
@@ -196,7 +190,7 @@ function handleReviewStartEvent(event, session) {
  * ユーザーの現在の進行中セッションを取得
  */
 function getUserStatus(userId) {
-  const sheet = getLogsSheet();
+  const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Logs');
   const data = sheet.getDataRange().getValues();
   for (let i = data.length - 1; i >= 1; i--) {
     const status = data[i][COL.STATUS];
@@ -222,36 +216,17 @@ function getLogicalDate(date) {
  */
 function replyLineMessage(replyToken, text) {
   const url = 'https://api.line.me/v2/bot/message/reply';
-  try {
-    const response = UrlFetchApp.fetch(url, {
-      'headers': {
-        'Content-Type': 'application/json; charset=UTF-8',
-        'Authorization': 'Bearer ' + ACCESS_TOKEN,
-      },
-      'method': 'post',
-      'payload': JSON.stringify({
-        'replyToken': replyToken,
-        'messages': [{ 'type': 'text', 'text': text }]
-      }),
-      'muteHttpExceptions': true
-    });
-    if (response.getResponseCode() !== 200) {
-      console.error(`[LINE_Reply] Failed. Code: ${response.getResponseCode()}, Body: ${response.getContentText()}`);
-    }
-  } catch (e) {
-    console.error(`[LINE_Reply] Critical Error: ${e.toString()}`);
-  }
-}
-
-/**
- * ログシートの取得（共通化）
- */
-function getLogsSheet() {
-  if (!SPREADSHEET_ID) throw new Error('SPREADSHEET_ID is not set in script properties.');
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const sheet = ss.getSheetByName('Logs');
-  if (!sheet) throw new Error('Sheet "Logs" not found.');
-  return sheet;
+  UrlFetchApp.fetch(url, {
+    'headers': {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Authorization': 'Bearer ' + ACCESS_TOKEN,
+    },
+    'method': 'post',
+    'payload': JSON.stringify({
+      'replyToken': replyToken,
+      'messages': [{ 'type': 'text', 'text': text }]
+    })
+  });
 }
 
 /**
@@ -259,36 +234,15 @@ function getLogsSheet() {
  */
 function pushLineMessage(userId, text) {
   const url = 'https://api.line.me/v2/bot/message/push';
-  try {
-    const response = UrlFetchApp.fetch(url, {
-      'headers': {
-        'Content-Type': 'application/json; charset=UTF-8',
-        'Authorization': 'Bearer ' + ACCESS_TOKEN,
-      },
-      'method': 'post',
-      'payload': JSON.stringify({
-        'to': userId,
-        'messages': [{ 'type': 'text', 'text': text }]
-      }),
-      'muteHttpExceptions': true
-    });
-    
-    if (response.getResponseCode() !== 200) {
-      console.error(`[LINE_Push] Failed. Code: ${response.getResponseCode()}, Body: ${response.getContentText()}`);
-    } else {
-      console.log(`[LINE_Push] Success: to ${userId}`);
-    }
-  } catch (e) {
-    console.error(`[LINE_Push] Critical Error: ${e.toString()}`);
-  }
-}
-
-/**
- * 署名検証
- */
-function verifySignature(body, signature) {
-  if (!signature) return false;
-  const hash = Utilities.computeHmacSha256Signature(body, CHANNEL_SECRET);
-  const check = Utilities.base64Encode(hash);
-  return check === signature;
+  UrlFetchApp.fetch(url, {
+    'headers': {
+      'Content-Type': 'application/json; charset=UTF-8',
+      'Authorization': 'Bearer ' + ACCESS_TOKEN,
+    },
+    'method': 'post',
+    'payload': JSON.stringify({
+      'to': userId,
+      'messages': [{ 'type': 'text', 'text': text }]
+    })
+  });
 }
