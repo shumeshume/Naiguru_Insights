@@ -128,38 +128,60 @@ function handleNaiguruMessage(event, session, userText) {
     console.log(`[Message] Target set for Row: ${rowIndex}. Status -> ACTIVE`);
     replyLineMessage(event.replyToken, `目標「${userText}」を受け付けました。\n練習が終わったら「振り返り開始FURIKAERI」と送ってください。`);
 
-  } else if (session.status === 'REVIEW_READY') {
-    // 振り返り内容の保存
-    sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
-    // ステータスを DATA_INPUT に変更して、次からの入力が振り返り列を上書きしないようにする
-    sheet.getRange(rowIndex, COL.STATUS + 1).setValue('DATA_INPUT');
-    SpreadsheetApp.flush(); // 即座に反映
-    console.log(`[Message] Review note saved and Status -> DATA_INPUT for Row: ${rowIndex}.`);
-
-    // 数値入力が必要な項目があるかチェック
+  } else if (session.status === 'REVIEW_READY' || session.status === 'DATA_INPUT') {
+    // 現在のシートデータを取得して、実際の入力状況を確認する
     const lastCol = sheet.getLastColumn();
     const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+    const evalNote = rowValues[COL.EVAL_NOTE];
     const nextItem = getNextNumericItem(rowValues);
 
-    if (nextItem) {
-      const msg = `振り返りを記録しました。\n次に数値を入力してください。\n\n${nextItem.label}を入力してください。\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`;
-      replyLineMessage(event.replyToken, msg);
-    } else {
-      finalizeSession(sheet, rowIndex, event.replyToken);
-    }
+    // 振り返り文 (F列) がまだ入力されていない場合は保存する
+    if (!evalNote || evalNote === "") {
+      sheet.getRange(rowIndex, COL.EVAL_NOTE + 1).setValue(userText);
+      // 振り返り保存後は、数値入力待ち状態 (DATA_INPUT) に移行
+      sheet.getRange(rowIndex, COL.STATUS + 1).setValue('DATA_INPUT');
+      SpreadsheetApp.flush(); // 即座に反映させて、次の判定で最新の値を読み取れるようにする
+      console.log(`[Message] Review note saved and Status -> DATA_INPUT for Row: ${rowIndex}.`);
 
-  } else if (session.status === 'DATA_INPUT') {
-    // 数値入力フェーズ
-    const lastCol = sheet.getLastColumn();
-    const rowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
-    const nextItem = getNextNumericItem(rowValues);
+      // 数値入力が必要な項目があるかチェック
+      const updatedRowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
+      const firstNumericItem = getNextNumericItem(updatedRowValues);
 
-    if (nextItem) {
-      // 数値またはスキップの処理
+      if (firstNumericItem) {
+        let exampleMsg = "";
+        if (firstNumericItem.type === 'time') {
+          exampleMsg = "（例：1:30）";
+        }
+        const msg = `振り返りを記録しました。\n次に数値を入力してください。\n\n${firstNumericItem.label}を入力してください。${exampleMsg}\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`;
+        replyLineMessage(event.replyToken, msg);
+      } else {
+        // 数値項目がない場合は終了
+        finalizeSession(sheet, rowIndex, event.replyToken);
+      }
+
+    } else if (nextItem) {
+      // 既に振り返り文がある場合は、数値入力として処理する
+      // ステータスが DATA_INPUT でない場合は補正
+      if (session.status !== 'DATA_INPUT') {
+        sheet.getRange(rowIndex, COL.STATUS + 1).setValue('DATA_INPUT');
+      }
+
       if (userText === SKIP_KEYWORD) {
+        // スキップ：ハイフンを書き込んで「入力済み」扱いにする（空文字判定を避けるため）
         sheet.getRange(rowIndex, nextItem.col + 1).setValue("-");
         console.log(`[Message] Skipped input for ${nextItem.label}`);
+      } else if (nextItem.type === 'time') {
+        // 時間形式 (hh:mm) のバリデーション
+        const timeRegex = /^([0-9]{1,2}):([0-9]{2})$/;
+        if (timeRegex.test(userText)) {
+          sheet.getRange(rowIndex, nextItem.col + 1).setValue(userText);
+          console.log(`[Message] Saved ${nextItem.label}: ${userText}`);
+        } else {
+          replyLineMessage(event.replyToken, `${nextItem.label}を hh:mm 形式（例：1:30）で入力してください。スキップする場合は「${SKIP_KEYWORD}」を入力してください。`);
+          return;
+        }
       } else {
+        // 通常の数値バリデーション
         const num = Number(userText);
         if (!isNaN(num) && userText !== "") {
           sheet.getRange(rowIndex, nextItem.col + 1).setValue(num);
@@ -170,17 +192,25 @@ function handleNaiguruMessage(event, session, userText) {
         }
       }
       
-      SpreadsheetApp.flush(); // 即座に反映
+      SpreadsheetApp.flush();
 
       // 次の項目をチェック
       const updatedRowValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0];
       const followingItem = getNextNumericItem(updatedRowValues);
 
       if (followingItem) {
-        replyLineMessage(event.replyToken, `${followingItem.label}を入力してください。\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`);
+        let exampleMsg = "";
+        if (followingItem.type === 'time') {
+          exampleMsg = "（例：1:30）";
+        }
+        replyLineMessage(event.replyToken, `${followingItem.label}を入力してください。${exampleMsg}\n（スキップする場合は「${SKIP_KEYWORD}」を入力）`);
       } else {
+        // 全ての数値入力が完了
         finalizeSession(sheet, rowIndex, event.replyToken);
       }
+    } else {
+      // 振り返りも数値も全て埋まっている場合
+      finalizeSession(sheet, rowIndex, event.replyToken);
     }
   }
 }

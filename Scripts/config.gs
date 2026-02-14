@@ -25,11 +25,12 @@ const COL = {
 };
 
 // 数値入力項目の定義（順番、ラベル、列の対応）
+// typeを指定しない場合は数値チェック、'time'を指定した場合はhh:mm形式を許可
 const NUMERIC_COL_DEFINITIONS = [
   { label: 'BULL数', col: COL.BULL_COUNT },
   { label: 'LowTon数', col: COL.LOWTON_COUNT },
   { label: 'Range', col: COL.RANGE },
-  { label: 'DARTSLIVEプレイ時間', col: COL.TIME_PLAYED_ON_DARTSLIVE }
+  { label: 'DARTSLIVEプレイ時間', col: COL.TIME_PLAYED_ON_DARTSLIVE, type: 'time' }
 ];
 
 // 入力をスキップするためのマジックワード
