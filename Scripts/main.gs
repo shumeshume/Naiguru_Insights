@@ -1,9 +1,7 @@
 /**
- * main.gs - Naiguru Insights (v1.6.1)
- * * 変更点:
- * 1. v1.4a からリマインド機能 (checkAndSendReminders) を復元し、COL定数に対応
- * 2. ロギング機能の追加
- * 3. プッシュメッセージ送信関数の追加
+ * main.gs - Naiguru Insights (v1.7.0)
+ * * 変更点:Messaging APIの署名検証機能を実装
+ * 1. 
  */
 
 /**
