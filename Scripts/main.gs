@@ -1,18 +1,15 @@
 /**
- * main.gs - Naiguru Insights (v1.7.1)
- * 1.Messaging APIの署名検証機能を実装
- * 2.Webhook検証時の空イベントによるエラーを回避
+ * main.gs - Naiguru Insights (v1.6.1)
+ * * 変更点:
+ * 1. v1.4a からリマインド機能 (checkAndSendReminders) を復元し、COL定数に対応
+ * 2. ロギング機能の追加
+ * 3. プッシュメッセージ送信関数の追加
  */
 
 /**
  * LINE Webhookからのリクエストを処理するエントリポイント
  */
 function doPost(e) {
-  // 署名検証
-  if (!validateSignature(e)) {
-    return ContentService.createTextOutput(JSON.stringify({ content: "post ok" })).setMimeType(ContentService.MimeType.JSON);
-  }
-
   // 短い間隔でのメッセージ受信による競合を防ぐためのロックを取得
   const lock = LockService.getUserLock();
   try {
@@ -20,13 +17,6 @@ function doPost(e) {
     lock.waitLock(10000);
 
     const contents = JSON.parse(e.postData.contents);
-    
-    // LINEからの検証リクエスト等、イベントが空の場合は正常終了させる
-    if (!contents.events || contents.events.length === 0) {
-      console.log("[Webhook] No events found. (Validation request or empty event)");
-      return;
-    }
-
     const events = contents.events;
     
     for (const event of events) {
@@ -390,28 +380,4 @@ function pushLineMessage(userId, text) {
       'messages': [{ 'type': 'text', 'text': text }]
     })
   });
-}
-
-/**
- * LINE Messaging APIの署名検証を行う
- */
-function validateSignature(e) {
-  const signature = e.parameter['x-line-signature'] || e.headers['x-line-signature'];
-  if (!signature) {
-    console.error('[Signature] Missing signature');
-    return false;
-  }
-
-  const channelSecret = CHANNEL_SECRET;
-  const body = e.postData.contents;
-  const hash = Utilities.computeHmacSha256Signature(body, channelSecret);
-  const checkSignature = Utilities.base64Encode(hash);
-
-  if (signature !== checkSignature) {
-    console.error('[Signature] Invalid signature');
-    return false;
-  }
-
-  console.log('[Signature] Validation successful');
-  return true;
 }
