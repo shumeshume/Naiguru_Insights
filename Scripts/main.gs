@@ -1,7 +1,7 @@
 /**
- * main.gs - Naiguru Insights (v1.7.0)
- * * 変更点:Messaging APIの署名検証機能を実装
- * 1. 
+ * main.gs - Naiguru Insights (v1.7.1)
+ * 1.Messaging APIの署名検証機能を実装
+ * 2.Webhook検証時の空イベントによるエラーを回避
  */
 
 /**
@@ -20,6 +20,13 @@ function doPost(e) {
     lock.waitLock(10000);
 
     const contents = JSON.parse(e.postData.contents);
+    
+    // LINEからの検証リクエスト等、イベントが空の場合は正常終了させる
+    if (!contents.events || contents.events.length === 0) {
+      console.log("[Webhook] No events found. (Validation request or empty event)");
+      return;
+    }
+
     const events = contents.events;
     
     for (const event of events) {
